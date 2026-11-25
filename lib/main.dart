@@ -1,11 +1,18 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:sutura_vault/core/database/database_helper.dart';
+import 'package:sutura_vault/core/security/security_guard.dart';
+import 'package:sutura_vault/core/security/security_service.dart';
 import 'package:sutura_vault/core/theme/oled_theme.dart';
+import 'package:sutura_vault/core/utils/clipboard_vault.dart';
+import 'package:sutura_vault/features/auth/lock_screen.dart';
+import 'package:sutura_vault/features/auth/onboarding_pin_setup_screen.dart';
+import 'package:sutura_vault/features/vault/vault_home_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Barre de statut & navigation fondues dans le noir OLED (#0D0F12)
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -28,68 +35,118 @@ class SuturaVaultApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       themeMode: ThemeMode.dark,
       darkTheme: OledTheme.darkTheme,
-      home: const _VaultBootstrapScreen(),
+      home: const _SuturaRootGate(),
     );
   }
 }
 
-/// Écran transitoire du Jalon 1 — sera remplacé par le Gatekeeper
-/// (Onboarding Master PIN / LockScreen) au Jalon 3.
-class _VaultBootstrapScreen extends StatelessWidget {
-  const _VaultBootstrapScreen();
+enum _GateStage {
+  loading,
+  onboarding,
+  locked,
+  unlocked,
+}
+
+class _SuturaRootGate extends StatefulWidget {
+  const _SuturaRootGate();
+
+  @override
+  State<_SuturaRootGate> createState() => _SuturaRootGateState();
+}
+
+class _SuturaRootGateState extends State<_SuturaRootGate>
+    with WidgetsBindingObserver {
+  _GateStage _stage = _GateStage.loading;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    unawaited(_bootstrap());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  Future<void> _bootstrap() async {
+    final initialized = await SecurityService.instance.isVaultInitialized();
+    if (!mounted) return;
+    setState(() {
+      _stage = initialized ? _GateStage.locked : _GateStage.onboarding;
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_stage != _GateStage.unlocked) return;
+
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      SecurityGuard.instance.markBackgrounded();
+    } else if (state == AppLifecycleState.resumed) {
+      unawaited(_checkAutoLockOnResume());
+    }
+  }
+
+  Future<void> _checkAutoLockOnResume() async {
+    final timeout = await SecurityService.instance.getAutoLockTimeoutSeconds();
+    if (!mounted || _stage != _GateStage.unlocked) return;
+
+    if (SecurityGuard.instance.shouldLockOnResume(
+      autoLockTimeoutSeconds: timeout,
+    )) {
+      await _lockVault();
+    }
+  }
+
+  Future<void> _lockVault() async {
+    await DatabaseHelper.instance.lock();
+    await ClipboardVault.instance.purgeNow();
+    if (!mounted) return;
+    setState(() => _stage = _GateStage.locked);
+  }
+
+  void _handleVaultWiped() {
+    if (!mounted) return;
+    setState(() => _stage = _GateStage.onboarding);
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 28),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 76,
-                  height: 76,
-                  decoration: BoxDecoration(
-                    color: OledTheme.surfaceCard,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: OledTheme.accentEmerald.withValues(alpha: 0.45),
-                      width: 1.5,
-                    ),
-                  ),
-                  child: const Icon(
-                    Icons.shield_outlined,
-                    size: 38,
-                    color: OledTheme.accentEmerald,
-                  ),
-                ),
-                const SizedBox(height: 24),
-                const Text(
-                  'SUTURA VAULT',
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 2.2,
-                    color: OledTheme.textPrimary,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Zero-Cloud • Zero-Internet • AES-256 SQLCipher',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: OledTheme.textSecondary,
-                    letterSpacing: 0.4,
-                  ),
-                ),
-              ],
+    switch (_stage) {
+      case _GateStage.loading:
+        return const Scaffold(
+          body: Center(
+            child: CircularProgressIndicator(
+              color: OledTheme.accentEmerald,
             ),
           ),
-        ),
-      ),
-    );
+        );
+
+      case _GateStage.onboarding:
+        return OnboardingPinSetupScreen(
+          onVaultInitialized: () {
+            if (!mounted) return;
+            setState(() => _stage = _GateStage.unlocked);
+          },
+        );
+
+      case _GateStage.locked:
+        return LockScreen(
+          onUnlocked: ({required bool isDecoy}) {
+            if (!mounted) return;
+            setState(() => _stage = _GateStage.unlocked);
+          },
+        );
+
+      case _GateStage.unlocked:
+        return VaultHomeScreen(
+          onLockRequested: () => unawaited(_lockVault()),
+          onVaultWiped: _handleVaultWiped,
+        );
+    }
   }
 }
