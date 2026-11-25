@@ -1,17 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sutura_vault/core/theme/oled_theme.dart';
+import 'package:sutura_vault/features/vault/tabs/black_audio_tab.dart';
+import 'package:sutura_vault/features/vault/tabs/black_notes_tab.dart';
+import 'package:sutura_vault/features/vault/tabs/credentials_tab.dart';
+import 'package:sutura_vault/features/vault/tabs/documents_tab.dart';
 
 /// Tableau de bord principal hébergeant les 4 compartiments de l'IT-Vault.
 class VaultHomeScreen extends StatefulWidget {
   const VaultHomeScreen({
     required this.onLockRequested,
     required this.onVaultWiped,
+    this.onOpenSecurityCenter,
     super.key,
   });
 
   final VoidCallback onLockRequested;
   final VoidCallback onVaultWiped;
+  final VoidCallback? onOpenSecurityCenter;
 
   @override
   State<VaultHomeScreen> createState() => _VaultHomeScreenState();
@@ -27,6 +33,13 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     'Mémos Vocaux Noirs',
   ];
 
+  static const List<Widget> _tabs = <Widget>[
+    CredentialsTab(),
+    DocumentsTab(),
+    BlackNotesTab(),
+    BlackAudioTab(),
+  ];
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -39,6 +52,18 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           ),
         ),
         actions: [
+          if (widget.onOpenSecurityCenter != null)
+            IconButton(
+              tooltip: 'Centre de Sécurité & Sauvegarde',
+              icon: const Icon(
+                Icons.shield_outlined,
+                color: OledTheme.accentBlue,
+              ),
+              onPressed: () {
+                HapticFeedback.lightImpact();
+                widget.onOpenSecurityCenter!();
+              },
+            ),
           IconButton(
             tooltip: 'Verrouiller le coffre',
             icon: const Icon(
@@ -52,38 +77,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           ),
         ],
       ),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.verified_user_outlined,
-                size: 46,
-                color: OledTheme.accentEmerald,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                _titles[_selectedIndex],
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  color: OledTheme.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Base SQLCipher AES-256 ouverte et isolée.\nLes 4 compartiments complets arrivent au Jalon 4.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: OledTheme.textSecondary,
-                ),
-              ),
-            ],
-          ),
-        ),
+      body: IndexedStack(
+        index: _selectedIndex,
+        children: _tabs,
       ),
       bottomNavigationBar: NavigationBar(
         backgroundColor: OledTheme.surfaceDark,
