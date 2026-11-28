@@ -397,4 +397,36 @@ class SecurityService {
 
   /// Purge intégrale du Keystore matériel (utilisé par Panic Wipe — SEC-12).
   Future<void> wipeAllSecureKeys() => _store.deleteAll();
+
+  /// Enregistre un échec externe (ex: mauvaise réponse aux questions de récupération)
+  /// dans le même compteur anti-force brute persistant (SEC-07).
+  Future<PinAuthResult> registerFailedRecoveryAttempt() =>
+      _registerFailedAttempt();
+
+  /// Met à jour le hash Master (et la clé TEE si autorisée) après une
+  /// récupération réussie + PRAGMA rekey.
+  Future<void> commitRecoveredMasterPin({
+    required String newPin,
+    required String newDerivedKey,
+  }) async {
+    if (!isValidPinFormat(newPin)) {
+      throw ArgumentError('Le nouveau Master PIN doit contenir 6 chiffres.');
+    }
+
+    final newHash = CryptoEngine.hashPinForStorage(newPin);
+    final decoyHash = await _store.read(_kDecoyPinHash);
+    if (decoyHash != null &&
+        CryptoEngine.constantTimeEquals(decoyHash, newHash)) {
+      throw const PinCollisionException(
+        'Le nouveau Master PIN ne peut pas être identique au Decoy PIN.',
+      );
+    }
+
+    await _store.write(_kMasterPinHash, newHash);
+    await _resetBruteForceCounter();
+
+    if (await isBiometricsUserAllowed()) {
+      await _store.write(_kBioMasterKey, newDerivedKey);
+    }
+  }
 }

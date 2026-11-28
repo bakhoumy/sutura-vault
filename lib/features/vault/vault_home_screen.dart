@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sutura_vault/core/theme/oled_theme.dart';
+import 'package:sutura_vault/features/security_center/security_center_screen.dart';
 import 'package:sutura_vault/features/vault/tabs/black_audio_tab.dart';
 import 'package:sutura_vault/features/vault/tabs/black_notes_tab.dart';
 import 'package:sutura_vault/features/vault/tabs/credentials_tab.dart';
@@ -11,13 +12,11 @@ class VaultHomeScreen extends StatefulWidget {
   const VaultHomeScreen({
     required this.onLockRequested,
     required this.onVaultWiped,
-    this.onOpenSecurityCenter,
     super.key,
   });
 
   final VoidCallback onLockRequested;
   final VoidCallback onVaultWiped;
-  final VoidCallback? onOpenSecurityCenter;
 
   @override
   State<VaultHomeScreen> createState() => _VaultHomeScreenState();
@@ -40,6 +39,18 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     BlackAudioTab(),
   ];
 
+  void _openSecurityCenter() {
+    HapticFeedback.lightImpact();
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => SecurityCenterScreen(
+          onLockRequested: widget.onLockRequested,
+          onVaultWiped: widget.onVaultWiped,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -52,18 +63,14 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           ),
         ),
         actions: [
-          if (widget.onOpenSecurityCenter != null)
-            IconButton(
-              tooltip: 'Centre de Sécurité & Sauvegarde',
-              icon: const Icon(
-                Icons.shield_outlined,
-                color: OledTheme.accentBlue,
-              ),
-              onPressed: () {
-                HapticFeedback.lightImpact();
-                widget.onOpenSecurityCenter!();
-              },
+          IconButton(
+            tooltip: 'Centre de Sécurité, Audit & Sauvegarde',
+            icon: const Icon(
+              Icons.shield_outlined,
+              color: OledTheme.accentBlue,
             ),
+            onPressed: _openSecurityCenter,
+          ),
           IconButton(
             tooltip: 'Verrouiller le coffre',
             icon: const Icon(

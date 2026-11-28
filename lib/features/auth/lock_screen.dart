@@ -2,9 +2,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sutura_vault/core/database/database_helper.dart';
+import 'package:sutura_vault/core/security/pin_recovery_service.dart';
 import 'package:sutura_vault/core/security/security_service.dart';
 import 'package:sutura_vault/core/theme/oled_theme.dart';
 import 'package:sutura_vault/features/auth/pin_input_pad.dart';
+import 'package:sutura_vault/features/auth/pin_recovery_screen.dart';
 
 /// Sas d'authentification principal de SUTURA VAULT.
 class LockScreen extends StatefulWidget {
@@ -22,6 +24,7 @@ class LockScreen extends StatefulWidget {
 class _LockScreenState extends State<LockScreen> {
   bool _scrambleEnabled = true;
   bool _biometricsEnabled = false;
+  bool _hasRecovery = false;
   bool _isBusy = false;
   int _lockoutRemainingSeconds = 0;
   int _padResetCounter = 0;
@@ -47,18 +50,20 @@ class _LockScreenState extends State<LockScreen> {
     final bioAvailable =
         bioAllowed ? await service.isDeviceBiometricsAvailable() : false;
     final remaining = await service.getRemainingLockoutSeconds();
+    final hasRecovery =
+        await PinRecoveryService.instance.isRecoveryConfigured();
 
     if (!mounted) return;
     setState(() {
       _scrambleEnabled = scramble;
       _biometricsEnabled = bioAllowed && bioAvailable;
+      _hasRecovery = hasRecovery;
       _lockoutRemainingSeconds = remaining;
     });
 
     if (remaining > 0) {
       _startLockoutCountdown(remaining);
     } else if (bioAllowed && bioAvailable) {
-      // Proposition biométrique immédiate si non bloqué et hors Zone Hostile
       unawaited(_tryBiometrics());
     }
   }
@@ -172,7 +177,7 @@ class _LockScreenState extends State<LockScreen> {
           _startLockoutCountdown(result.remainingLockoutSeconds);
           return;
       }
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
       HapticFeedback.heavyImpact();
       setState(() {
@@ -180,6 +185,21 @@ class _LockScreenState extends State<LockScreen> {
         _padResetCounter++;
         _errorText = 'Impossible d\'ouvrir le coffre chiffré.';
       });
+    }
+  }
+
+  Future<void> _openPinRecovery() async {
+    final recovered = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => const PinRecoveryScreen(),
+      ),
+    );
+    if (!mounted) return;
+
+    if (recovered == true) {
+      widget.onUnlocked(isDecoy: false);
+    } else {
+      await _loadSecurityState();
     }
   }
 
@@ -253,7 +273,7 @@ class _LockScreenState extends State<LockScreen> {
                 ),
                 const SizedBox(height: 24),
 
-                // Règle #6 : ValueKey unique à chaque réinitialisation (re-mélange Scramble Pad)
+                // Règle #6 : ValueKey unique à chaque réinitialisation
                 PinInputPad(
                   key: ValueKey<String>('lock_pad_$_padResetCounter'),
                   scramble: _scrambleEnabled,
@@ -284,15 +304,22 @@ class _LockScreenState extends State<LockScreen> {
                       icon: _biometricsEnabled
                           ? Icons.fingerprint
                           : Icons.gpp_good_outlined,
-                      label: _biometricsEnabled
-                          ? 'TEE Actif'
-                          : 'PIN Strict',
+                      label: _biometricsEnabled ? 'TEE Actif' : 'PIN Strict',
                       color: _biometricsEnabled
                           ? OledTheme.accentBlue
                           : OledTheme.accentAmber,
                     ),
                   ],
                 ),
+
+                if (_hasRecovery && !isLockedOut) ...[
+                  const SizedBox(height: 14),
+                  TextButton.icon(
+                    onPressed: () => unawaited(_openPinRecovery()),
+                    icon: const Icon(Icons.help_outline, size: 16),
+                    label: const Text('Code PIN oublié ?'),
+                  ),
+                ],
               ],
             ),
           ),
